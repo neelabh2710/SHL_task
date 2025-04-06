@@ -1,5 +1,6 @@
-streamlit
-sentence-transformers
 faiss-cpu
-pandas
 groq
+numpy
+pandas
+sentence-transformers
+streamlit
