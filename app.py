@@ -11,28 +11,64 @@ from groq import Groq
 os.environ["GROQ_API_KEY"] = "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"
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
+# A threshold for when the user query should be summarized before subquery generation
+QUERY_LENGTH_THRESHOLD = 300  # Feel free to adjust as needed
+
+
+# ========== Summarization for Large Queries ==========
+def summarize_query(long_query: str) -> str:
+    """
+    Summarizes a long query while preserving main requirement, technical requirements, 
+    and skill sets. Uses the Groq LLM for summarization.
+    """
+    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
+    
+    prompt = f"""
+You are a specialized query summarizer.
+
+The user provided a very long query:
+\"\"\"{long_query}\"\"\"
+
+Please write a concise summary that retains:
+- The main requirement(s)
+- Technical requirements
+- Skill sets
+
+Do not omit any critical details. 
+The summary must be significantly shorter than the original, 
+but still capture all relevant info for generating subqueries.
+"""
+
+    response = client.chat.completions.create(
+        model=model_name,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.7,
+        max_tokens=512
+    )
+    summarized_text = response.choices[0].message.content.strip()
+    return summarized_text
+
 
 # ========== LLM Subquery Generator ==========
 def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     """
     Generates subqueries using Groq LLM to aid in similarity search.
-    The subqueries specifically keep the main requirement, technical requirements,
-    and skill sets from the user query to ensure relevance.
+    Specifically preserves main requirements, technical details,
+    and skill sets from the input query or summary.
     """
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
 You are a subquery generator for a semantic search system.
 
-The user query may contain main requirements, technical requirements, and skill sets.
-We need to generate {num_subqueries} subqueries that capture these aspects from the user query, 
-so that we retrieve more contextually rich documents from a vector database.
+We have the following user query (or query summary):
+\"\"\"{user_query}\"\"\"
 
-User query: "{user_query}"
+We need to generate {num_subqueries} concise subqueries 
+that ensure we capture all essential aspects from the query 
+(main requirement, technical requirements, skill sets, etc.).
 
-Please write each subquery on its own line. Ensure the subqueries collectively
-preserve the main requirement, relevant technical details, and any skill sets
-mentioned in the user's query.
+Write each subquery on its own line.
 """
 
     response = client.chat.completions.create(
@@ -135,18 +171,27 @@ def retrieve_top_solutions(main_query: str,
                            top_k_per_subquery: int = 2, 
                            final_top_k: int = 5):
     """
-    1. Generate subqueries using Groq.
-    2. For each subquery, retrieve top_k_per_subquery results from FAISS.
-    3. Merge results, sort by distance, and return the top final_top_k.
+    1. If the query is large, summarize it.
+    2. Generate subqueries using Groq (with the summarized or original query).
+    3. For each subquery, retrieve top_k_per_subquery results from FAISS.
+    4. Merge results, sort by distance, and return the top final_top_k.
     """
-    subqueries = generate_subqueries_groq(main_query, num_subqueries)
+
+    # 1. Summarize the query if it's too long
+    if len(main_query) > QUERY_LENGTH_THRESHOLD:
+        summarized_query = summarize_query(main_query)
+        # 2. Generate subqueries from the summarized query
+        subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
+    else:
+        # Directly generate subqueries from the original query
+        subqueries = generate_subqueries_groq(main_query, num_subqueries)
 
     all_results = []
     for sq in subqueries:
         sq_results = retriever.search(sq, top_k=top_k_per_subquery)
         all_results.extend(sq_results)
 
-    # Sort by ascending distance
+    # Sort all results by ascending distance
     all_results.sort(key=lambda x: x[0])
 
     final_results = all_results[:final_top_k]
