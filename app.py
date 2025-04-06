@@ -12,7 +12,7 @@ os.environ["GROQ_API_KEY"] = "gsk_6QLEnN7xEDnLeKnueQIlWGdyb3FYkuzHiqZHGQ0i6Qefnh
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # A threshold for when the user query should be summarized before subquery generation
-QUERY_LENGTH_THRESHOLD = 200  # Feel free to adjust as needed
+QUERY_LENGTH_THRESHOLD = 100  # Feel free to adjust as needed
 
 
 # ========== Summarization for Large Queries ==========
