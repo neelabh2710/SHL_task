@@ -3,7 +3,7 @@ import re
 import pandas as pd
 import numpy as np
 import faiss
-import streamlit as st
+# import streamlit as st
 from sentence_transformers import SentenceTransformer
 from groq import Groq
 
@@ -33,10 +33,11 @@ Please write a concise summary that retains:
 - The main requirement(s)
 - Technical requirements
 - Skill sets
+- tech stack
 
 Do not omit any critical details. 
 The summary must be significantly shorter than the original, 
-but still capture all relevant info for generating subqueries.
+but still capture all relevant info for generating subqueries and it should no lag in any kind of important information fro the main querie.
 """
 
     response = client.chat.completions.create(
@@ -59,14 +60,14 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
-You are a subquery generator for a semantic search system.
+You are a high level subquery generator for a semantic search system so u need to keep the important key words of the Querie.
 
 We have the following user query (or query summary):
 \"\"\"{user_query}\"\"\"
 
 We need to generate {num_subqueries} concise subqueries 
-that ensure we capture all essential aspects from the query 
-(main requirement, technical requirements, skill sets, etc.).
+that ensure we capture all essential aspects from the query and should not keep the irrelevent part fro the querie in the sub queries just keep the part that is required.
+(main requirement, technical requirements, skill sets,tech stack, etc.).
 
 Write each subquery on its own line.
 """
