@@ -172,7 +172,8 @@ def retrieve_top_solutions(main_query: str,
 st.title("Groq + FAISS Subquery-based Similarity Search")
 
 # Hardcode the CSV path in the "backend"
-csv_path = "Final_data_with_details (1).csv"
+csv_path = r"Final_data_with_details.csv"
+
 # Check if file exists
 if not os.path.exists(csv_path):
     st.error(f"CSV not found at path: {csv_path}\n"
