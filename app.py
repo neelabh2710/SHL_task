@@ -16,16 +16,23 @@ client = Groq(api_key=os.environ["GROQ_API_KEY"])
 def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     """
     Generates subqueries using Groq LLM to aid in similarity search.
+    The subqueries specifically keep the main requirement, technical requirements,
+    and skill sets from the user query to ensure relevance.
     """
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
-
+    
     prompt = f"""
-You are a subquery generator for semantic search systems.
-The user query is: "{user_query}"
+You are a subquery generator for a semantic search system.
 
-Generate {num_subqueries} diverse and relevant subqueries that will help 
-retrieve more contextually rich documents from a vector database.
-Present each subquery on its own line.
+The user query may contain main requirements, technical requirements, and skill sets.
+We need to generate {num_subqueries} subqueries that capture these aspects from the user query, 
+so that we retrieve more contextually rich documents from a vector database.
+
+User query: "{user_query}"
+
+Please write each subquery on its own line. Ensure the subqueries collectively
+preserve the main requirement, relevant technical details, and any skill sets
+mentioned in the user's query.
 """
 
     response = client.chat.completions.create(
@@ -71,7 +78,6 @@ class JobSolutionRetriever:
     def load_data(self):
         """Load the CSV data into a pandas DataFrame."""
         self.df = pd.read_csv(self.csv_path)
-        st.write(f"Loaded {len(self.df)} rows from {self.csv_path}.")
 
     def convert_to_json(self):
         """Convert the CSV rows to a list of dictionaries."""
@@ -99,7 +105,6 @@ class JobSolutionRetriever:
             ])
             combined_texts.append(text_for_embedding)
 
-        st.write("Generating embeddings for each row...")
         vecs = self.embedding_model.encode(combined_texts, show_progress_bar=False)
         self.embeddings = np.array(vecs).astype('float32')
 
@@ -109,7 +114,6 @@ class JobSolutionRetriever:
 
         # Add embeddings to FAISS index
         self.index.add(self.embeddings)
-        st.write(f"FAISS index built with {self.index.ntotal} vectors.")
 
     def search(self, query: str, top_k: int = 3):
         """
@@ -169,7 +173,7 @@ def retrieve_top_solutions(main_query: str,
 
 # ========== STREAMLIT APP ==========
 
-st.title("Groq + FAISS Subquery-based Similarity Search")
+st.title("Recommendation System")
 
 # Hardcode the CSV path in the "backend"
 csv_path = r"Final_data_with_details.csv"
