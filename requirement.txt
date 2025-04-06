@@ -1,7 +1,7 @@
-faiss-cpu
 groq
 numpy
 pandas
+faiss-cpu==1.10.0
 transformers==4.50.3
 sentence-transformers==3.4.1
 streamlit
