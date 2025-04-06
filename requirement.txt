@@ -2,5 +2,6 @@ faiss-cpu
 groq
 numpy
 pandas
-sentence-transformers
+transformers==4.50.3
+sentence-transformers==3.4.1
 streamlit
