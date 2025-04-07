@@ -295,20 +295,17 @@ if "retriever" not in st.session_state:
         embedding_model_name="local_model"
     )
 
-# Provide input fields
+# Provide only query input
 main_query = st.text_input("Enter your query", "")
-num_subqueries = st.number_input("Number of Subqueries", min_value=1, value=3, step=1)
-top_k_per_subquery = st.number_input("Top-K per subquery", min_value=1, value=2, step=1)
-final_top_k = st.number_input("Final top-K", min_value=1, value=5, step=1)
 
-# On "Search" click, generate results
+# On "Search" click, generate results using default parameters
 if st.button("Search"):
     results = retrieve_top_solutions(
         main_query=main_query,
         retriever=st.session_state.retriever,
-        num_subqueries=num_subqueries,
-        top_k_per_subquery=top_k_per_subquery,
-        final_top_k=final_top_k
+        num_subqueries=3,          # Default value
+        top_k_per_subquery=2,      # Default value
+        final_top_k=5              # Default value
     )
 
     st.subheader("Results")
