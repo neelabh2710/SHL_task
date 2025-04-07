@@ -105,7 +105,7 @@ class JobSolutionRetriever:
     - Allows searching by query.
     """
 
-    def _init_(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
+    def __init__(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
         """
         :param csv_path: Path to the CSV file containing job solutions.
         :param embedding_model_name: Name of the SentenceTransformer model to use.
