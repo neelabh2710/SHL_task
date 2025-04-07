@@ -6,3 +6,4 @@ transformers==4.50.3
 sentence-transformers==3.4.1
 streamlit
 fastapi[standard]
+typing
