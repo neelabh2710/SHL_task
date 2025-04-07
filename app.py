@@ -217,4 +217,109 @@ def re_rank_with_local_model(all_results, main_query, embedding_model, final_top
 
 # ========== RETRIEVE + RERANK PIPELINE ==========
 def retrieve_top_solutions(
-    main_query_
+    main_query: str, 
+    retriever: JobSolutionRetriever, 
+    num_subqueries: int = 5, 
+    top_k_per_subquery: int = 2, 
+    final_top_k: int = 5
+):
+    """
+    1. If the query is large, summarize it.
+       - Then use that summary for subquery generation 
+         AND for final re-ranking (rather than the original query).
+    2. Otherwise, use the original query for both subquery generation & final re-ranking.
+    3. For each subquery, retrieve top_k_per_subquery results from FAISS.
+    4. Club all subquery results together (optionally remove duplicates).
+    5. Re-rank them using the (summarized or original) main query 
+       with the same local model.
+    6. Return the final top_k results.
+    """
+
+    if len(main_query) > QUERY_LENGTH_THRESHOLD:
+        # Summarize if the query is large
+        summarized_query = summarize_query(main_query)
+        # Use summarized_query for subqueries
+        subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
+        # Also use summarized_query for final ranking
+        query_for_rerank = summarized_query
+    else:
+        # Use the main query as is
+        subqueries = generate_subqueries_groq(main_query, num_subqueries)
+        query_for_rerank = main_query
+
+    # 2. Gather top_k results from each subquery
+    all_results = []
+    for sq in subqueries:
+        sq_results = retriever.search(sq, top_k=top_k_per_subquery)
+        all_results.extend(sq_results)
+
+    # 3. Remove duplicates if necessary (using 'URL' as a unique key)
+    unique_map = {}
+    for dist_val, row_data in all_results:
+        key = row_data.get("URL", "")
+        if key not in unique_map:
+            unique_map[key] = (dist_val, row_data)
+        else:
+            # Keep whichever has the lower distance
+            if dist_val < unique_map[key][0]:
+                unique_map[key] = (dist_val, row_data)
+
+    combined_unique_results = list(unique_map.values())  # => [(dist, row_dict), ...]
+
+    # 4. Re-rank with the local model using query_for_rerank
+    final_results = re_rank_with_local_model(
+        all_results=combined_unique_results,
+        main_query=query_for_rerank,
+        embedding_model=retriever.embedding_model,
+        final_top_k=final_top_k
+    )
+
+    return final_results
+
+# ========== STREAMLIT APP ==========
+st.title("Recommendation System")
+
+# Hardcode the CSV path in the "backend"
+csv_path = r"Final_data_with_details.csv"
+
+# Check if file exists
+if not os.path.exists(csv_path):
+    st.error(f"CSV not found at path: {csv_path}\n"
+             f"Please place 'Final_data_with_details.csv' in the same folder.")
+    st.stop()
+
+# Initialize the retriever in session state (only once)
+if "retriever" not in st.session_state:
+    st.session_state.retriever = JobSolutionRetriever(
+        csv_path=csv_path, 
+        embedding_model_name="local_model"
+    )
+
+# Provide input fields
+main_query = st.text_input("Enter your query", "")
+num_subqueries = st.number_input("Number of Subqueries", min_value=1, value=3, step=1)
+top_k_per_subquery = st.number_input("Top-K per subquery", min_value=1, value=2, step=1)
+final_top_k = st.number_input("Final top-K", min_value=1, value=5, step=1)
+
+# On "Search" click, generate results
+if st.button("Search"):
+    results = retrieve_top_solutions(
+        main_query=main_query,
+        retriever=st.session_state.retriever,
+        num_subqueries=num_subqueries,
+        top_k_per_subquery=top_k_per_subquery,
+        final_top_k=final_top_k
+    )
+
+    st.subheader("Results")
+    if results:
+        for i, item in enumerate(results, start=1):
+            st.markdown(f"**[{i}] Title**: {item['title']}")
+            st.markdown(f"- **Similarity Score**: {item['similarity_score']:.4f}")
+            st.markdown(f"- **Description**: {item['description']}")
+            st.markdown(f"- **Remote**: {item['remote']}")
+            st.markdown(f"- **Time Duration**: {item['time_duration']}")
+            st.markdown(f"- **URL**: {item['url']}")
+            st.markdown("---")
+    else:
+        st.write("No results found.")
