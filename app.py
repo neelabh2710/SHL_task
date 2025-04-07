@@ -24,21 +24,26 @@ def summarize_query(long_query: str) -> str:
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
-You are a specialized query summarizer.
+    You are a specialized query summarizer.
 
-The user provided a very long query:
-\"\"\"{long_query}\"\"\"
+    The user provided a lengthy job description or query:
+    \"\"\"{long_query}\"\"\"
 
-Please write a concise summary that retains:
-- The main requirement(s)
-- Technical requirements
-- Skill sets
-- tech stack
+    Your task is to write a concise summary that retains:
+    - Main requirement(s)
+    - Technical requirements
+    - Skill sets
+    - Tech stack
+    - Any other critical information from the original query
 
-Do not omit any critical details. 
-The summary must be significantly shorter than the original, 
-but still capture all relevant info for generating subqueries and it should no lag in any kind of important information fro the main querie.
-"""
+    Additionally:
+    - Do NOT omit any crucial details related to the job description or expectations.
+    - The summary must be significantly shorter than the original.
+    - The resulting summary should be highly relevant for generating subqueries,
+      without losing essential context or requirements.
+
+    Please provide only the summarized text.
+    """
 
     response = client.chat.completions.create(
         model=model_name,
