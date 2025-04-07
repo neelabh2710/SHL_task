@@ -39,7 +39,7 @@ def summarize_query(long_query: str) -> str:
     Additionally:
     - Do NOT omit any crucial details related to the job description or expectations.
     - The summary must be significantly shorter than the original.
-    - The resulting summary should be highly relevant for generating subqueries,
+    - The resulting summary should be highly relevant for generating subqueries
       without losing essential context or requirements.
 
     Please provide only the summarized text.
@@ -65,17 +65,24 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
-You are a high level subquery generator for a semantic search system so u need to keep the important key words of the Querie.
+    You are a high-level subquery generator for a semantic search system.
+    
+    The user query (or query summary) is:
+    \"\"\"{user_query}\"\"\"
+    
+    Your goal is to generate {num_subqueries} concise, precise subqueries that:
+    - Retain the main requirement(s)
+    - Emphasize critical technical requirements
+    - Include relevant skill sets and tech stack
+    - Exclude any information that is not essential to the query
+    
+    Each subquery should focus on a distinct aspect of the user query 
+    to ensure comprehensive coverage without duplication.
+    
+    Write each subquery on its own line. 
+    Do not add commentary or extra text beyond these subqueries.
+    """
 
-We have the following user query (or query summary):
-\"\"\"{user_query}\"\"\"
-
-We need to generate {num_subqueries} concise subqueries 
-that ensure we capture all essential aspects from the query and should not keep the irrelevent part fro the querie in the sub queries just keep the part that is required.
-(main requirement, technical requirements, skill sets,tech stack, etc.).
-
-Write each subquery on its own line.
-"""
 
     response = client.chat.completions.create(
         model=model_name,
