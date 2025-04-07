@@ -6,28 +6,28 @@ import faiss
 import streamlit as st
 from sentence_transformers import SentenceTransformer
 from groq import Groq
-from typing import List, Dict, Tuple
 
 # ========== Configure Groq ==========
-os.environ["GROQ_API_KEY"] = "..."
+os.environ["GROQ_API_KEY"] = "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"
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # A threshold for when the user query should be summarized before subquery generation
 QUERY_LENGTH_THRESHOLD = 100  # Feel free to adjust as needed
 
+
 # ========== Summarization for Large Queries ==========
 def summarize_query(long_query: str) -> str:
     """
-    Summarizes a long query while preserving main requirement, technical requirements,
+    Summarizes a long query while preserving main requirement, technical requirements, 
     and skill sets. Uses the Groq LLM for summarization.
     """
-    model_name = "llama3-70b-8192"
+    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
     You are a specialized query summarizer.
 
     The user provided a lengthy job description or query:
-    \"\"\"{long_query}\"\"\" 
+    \"\"\"{long_query}\"\"\"
 
     Your task is to write a concise summary that retains:
     - Main requirement(s)
@@ -54,6 +54,7 @@ def summarize_query(long_query: str) -> str:
     summarized_text = response.choices[0].message.content.strip()
     return summarized_text
 
+
 # ========== LLM Subquery Generator ==========
 def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     """
@@ -61,13 +62,13 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     Specifically preserves main requirements, technical details,
     and skill sets from the input query or summary.
     """
-    model_name = "llama3-70b-8192"
+    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
     prompt = f"""
     You are a high-level subquery generator for a semantic search system.
     
     The user query (or query summary) is:
-    \"\"\"{user_query}\"\"\" 
+    \"\"\"{user_query}\"\"\"
     
     Your goal is to generate {num_subqueries} concise, precise subqueries that:
     - Retain the main requirement(s)
@@ -75,12 +76,13 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     - Include relevant skill sets and tech stack
     - Exclude any information that is not essential to the query
     
-    Each subquery should focus on a distinct aspect of the user query
+    Each subquery should focus on a distinct aspect of the user query 
     to ensure comprehensive coverage without duplication.
     
-    Write each subquery on its own line.
+    Write each subquery on its own line. 
     Do not add commentary or extra text beyond these subqueries.
     """
+
 
     response = client.chat.completions.create(
         model=model_name,
@@ -88,20 +90,22 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
         temperature=0.7,
         max_tokens=512
     )
+
     generated_text = response.choices[0].message.content.strip()
     subqueries = [line.strip() for line in generated_text.split("\n") if line.strip()]
     return subqueries
 
+
 # ========== FAISS Retriever Class ==========
 class JobSolutionRetriever:
     """
-    - Loads a CSV of job solutions.
+    - Loads a CSV of job solutions (Final_data_with_details.csv).
     - Converts to JSON (list of dicts).
     - Builds a FAISS index by combining multiple columns into a single text for embedding.
     - Allows searching by query.
     """
 
-    def __init__(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
+    def _init_(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
         """
         :param csv_path: Path to the CSV file containing job solutions.
         :param embedding_model_name: Name of the SentenceTransformer model to use.
@@ -131,6 +135,9 @@ class JobSolutionRetriever:
     def build_vector_index(self):
         """
         Build a FAISS index from the combined text of each row.
+        Assuming columns like:
+          - Solution Type, Solution Name, URL, Remote Testing Support,
+            Adaptive/IRT Support, Description, Job Level, Languages, Assessment Length
         """
         combined_texts = []
         for row in self.data_json:
@@ -157,7 +164,7 @@ class JobSolutionRetriever:
         # Add embeddings to FAISS index
         self.index.add(self.embeddings)
 
-    def search(self, query: str, top_k: int = 3) -> List[Tuple[float, Dict]]:
+    def search(self, query: str, top_k: int = 3):
         """
         Embed the user query, then search in FAISS for the top_k results.
         Returns a list of (distance, row_dict).
@@ -170,108 +177,63 @@ class JobSolutionRetriever:
             results.append((dist, self.data_json[idx]))
         return results
 
-# ========== Re-ranking with the SAME Model ==========
-def re_rank_results_with_same_model(
-    combined_results: List[Tuple[float, Dict]],
-    main_query: str,
-    embedding_model: SentenceTransformer,
-    top_k: int = 5
-) -> List[Dict]:
-    """
-    1. Use the SAME embedding model to embed main_query and candidate results.
-    2. Compute cosine similarity for final re-ranking.
-    3. Return the top_k results.
-    """
-    # Embed the main query
-    query_emb = embedding_model.encode([main_query])[0]
 
-    re_ranked = []
-    for orig_dist, row_data in combined_results:
-        # For the final re-ranking, choose the text representation you want to compare.
-        # Here we combine "Description" + "Solution Name":
-        text_for_embedding = row_data.get("Description", "") + " " + row_data.get("Solution Name", "")
-        cand_emb = embedding_model.encode([text_for_embedding])[0]
-
-        # Compute cosine similarity
-        sim = np.dot(query_emb, cand_emb) / (
-            np.linalg.norm(query_emb) * np.linalg.norm(cand_emb)
-        )
-        
-        re_ranked.append((sim, row_data))
-
-    # Sort by descending similarity
-    re_ranked.sort(key=lambda x: x[0], reverse=True)
-
-    # Return the top_k in a more readable format
-    final_results = []
-    for sim, row_data in re_ranked[:top_k]:
-        final_results.append({
-            "similarity_score": sim,
-            "title": row_data.get("Solution Name", ""),
-            "description": row_data.get("Description", ""),
-            "remote": row_data.get("Remote Testing Support", ""),
-            "time_duration": row_data.get("Assessment Length", ""),
-            "url": row_data.get("URL", "")
-        })
-    return final_results
-
-# ========== Main Retrieval Pipeline ==========
-def retrieve_top_solutions(
-    main_query: str, 
-    retriever: JobSolutionRetriever, 
-    num_subqueries: int = 5, 
-    top_k_per_subquery: int = 2, 
-    final_top_k: int = 5
-) -> List[Dict]:
+def retrieve_top_solutions(main_query: str, 
+                           retriever: JobSolutionRetriever, 
+                           num_subqueries: int = 5, 
+                           top_k_per_subquery: int = 2, 
+                           final_top_k: int = 5):
     """
     1. If the query is large, summarize it.
     2. Generate subqueries using Groq (with the summarized or original query).
-    3. For each subquery, retrieve top_k_per_subquery results.
-    4. Combine all results into one set (removing duplicates).
-    5. Re-rank them against the main query using the SAME model as used in the retriever.
-    6. Return final_top_k items.
+    3. For each subquery, retrieve top_k_per_subquery results from FAISS.
+    4. Merge results, sort by distance, and return the top final_top_k.
     """
 
-    # 1. Summarize if needed
+    # 1. Summarize the query if it's too long
     if len(main_query) > QUERY_LENGTH_THRESHOLD:
         summarized_query = summarize_query(main_query)
+        # 2. Generate subqueries from the summarized query
         subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
     else:
+        # Directly generate subqueries from the original query
         subqueries = generate_subqueries_groq(main_query, num_subqueries)
 
-    # 2. Retrieve top_k for each subquery
     all_results = []
     for sq in subqueries:
         sq_results = retriever.search(sq, top_k=top_k_per_subquery)
         all_results.extend(sq_results)
 
-    # 3. Remove duplicates (based on URL, or any unique field)
-    unique_map = {}
-    for dist_val, row_data in all_results:
-        key = row_data.get("URL", "")  # or "Solution Name" if that is unique
-        if key not in unique_map:
-            unique_map[key] = (dist_val, row_data)
-        else:
-            # Keep whichever is "closer" in the original distance
-            if dist_val < unique_map[key][0]:
-                unique_map[key] = (dist_val, row_data)
+    # Sort all results by ascending distance
+    all_results.sort(key=lambda x: x[0])
 
-    combined_unique_results = list(unique_map.values())
+    final_results = all_results[:final_top_k]
 
-    # 4. Re-rank with the SAME model used for the retriever
-    re_ranked_final = re_rank_results_with_same_model(
-        combined_unique_results,
-        main_query=main_query,
-        embedding_model=retriever.embedding_model,  # use the same model as in retriever
-        top_k=final_top_k
-    )
+    # Format output
+    output = []
+    for dist, row_data in final_results:
+        solution_name = row_data.get("Solution Name", "")
+        description = row_data.get("Description", "")
+        remote = row_data.get("Remote Testing Support", "")
+        time_duration = row_data.get("Assessment Length", "")
+        url = row_data.get("URL", "")
 
-    return re_ranked_final
+        output.append({
+            "title": solution_name,
+            "description": description,
+            "remote": remote,
+            "time_duration": time_duration,
+            "url": url
+        })
+
+    return output
+
 
 # ========== STREAMLIT APP ==========
+
 st.title("Recommendation System")
 
-# Hardcode the CSV path
+# Hardcode the CSV path in the "backend"
 csv_path = r"Final_data_with_details.csv"
 
 # Check if file exists
@@ -303,12 +265,11 @@ if st.button("Search"):
     st.subheader("Results")
     if results:
         for i, item in enumerate(results, start=1):
-            st.markdown(f"**[{i}] Title**: {item['title']}")
-            st.markdown(f"- **Description**: {item['description']}")
-            st.markdown(f"- **Similarity Score**: {item['similarity_score']:.4f}")
-            st.markdown(f"- **Remote**: {item['remote']}")
-            st.markdown(f"- **Time Duration**: {item['time_duration']}")
-            st.markdown(f"- **URL**: {item['url']}")
+            st.markdown(f"[{i}] Title**: {item['title']}")
+            st.markdown(f"- *Description*: {item['description']}")
+            st.markdown(f"- *Remote*: {item['remote']}")
+            st.markdown(f"- *Time Duration*: {item['time_duration']}")
+            st.markdown(f"- *URL*: {item['url']}")
             st.markdown("---")
     else:
         st.write("No results found.")
