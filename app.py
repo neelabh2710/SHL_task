@@ -303,9 +303,9 @@ if st.button("Search"):
     results = retrieve_top_solutions(
         main_query=main_query,
         retriever=st.session_state.retriever,
-        num_subqueries=3,          # Default value
-        top_k_per_subquery=2,      # Default value
-        final_top_k=5              # Default value
+        num_subqueries=5,          # Default value
+        top_k_per_subquery=5,      # Default value
+        final_top_k=10              # Default value
     )
 
     st.subheader("Results")
