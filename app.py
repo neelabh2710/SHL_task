@@ -11,78 +11,22 @@ from groq import Groq
 os.environ["GROQ_API_KEY"] = "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"
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
-# A threshold for when the user query should be summarized before subquery generation
-QUERY_LENGTH_THRESHOLD = 100  # Feel free to adjust as needed
-
-
-# ========== Summarization for Large Queries ==========
-def summarize_query(long_query: str) -> str:
-    """
-    Summarizes a long query while preserving main requirement, technical requirements, 
-    and skill sets. Uses the Groq LLM for summarization.
-    """
-    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
-    
-    prompt = f"""
-    You are a specialized query summarizer.
-
-    The user provided a lengthy job description or query:
-    \"\"\"{long_query}\"\"\"
-
-    Your task is to write a concise summary that retains:
-    - Main requirement(s)
-    - Technical requirements
-    - Skill sets
-    - Tech stack
-    - Any other critical information from the original query
-
-    Additionally:
-    - Do NOT omit any crucial details related to the job description or expectations.
-    - The summary must be significantly shorter than the original.
-    - The resulting summary should be highly relevant for generating subqueries
-      without losing essential context or requirements.
-
-    Please provide only the summarized text.
-    """
-
-    response = client.chat.completions.create(
-        model=model_name,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.7,
-        max_tokens=200
-    )
-    summarized_text = response.choices[0].message.content.strip()
-    return summarized_text
-
 
 # ========== LLM Subquery Generator ==========
 def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     """
     Generates subqueries using Groq LLM to aid in similarity search.
-    Specifically preserves main requirements, technical details,
-    and skill sets from the input query or summary.
     """
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
-    
-    prompt = f"""
-    You are a high-level subquery generator for a semantic search system.
-    
-    The user query (or query summary) is:
-    \"\"\"{user_query}\"\"\"
-    
-    Your goal is to generate {num_subqueries} concise, precise subqueries that:
-    - Retain the main requirement(s)
-    - Emphasize critical technical requirements
-    - Include relevant skill sets and tech stack
-    - Exclude any information that is not essential to the query
-    
-    Each subquery should focus on a distinct aspect of the user query 
-    to ensure comprehensive coverage without duplication.
-    
-    Write each subquery on its own line. 
-    Do not add commentary or extra text beyond these subqueries.
-    """
 
+    prompt = f"""
+You are a subquery generator for semantic search systems.
+The user query is: "{user_query}"
+
+Generate {num_subqueries} diverse and relevant subqueries that will help 
+retrieve more contextually rich documents from a vector database.
+Present each subquery on its own line.
+"""
 
     response = client.chat.completions.create(
         model=model_name,
@@ -105,7 +49,8 @@ class JobSolutionRetriever:
     - Allows searching by query.
     """
 
-    def __init__(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
+    # def __init__(self, csv_path: str, embedding_model_name="all-MiniLM-L6-v2"):
+    def __init__(self, csv_path: str, embedding_model_name="local_model"):
         """
         :param csv_path: Path to the CSV file containing job solutions.
         :param embedding_model_name: Name of the SentenceTransformer model to use.
@@ -127,6 +72,7 @@ class JobSolutionRetriever:
     def load_data(self):
         """Load the CSV data into a pandas DataFrame."""
         self.df = pd.read_csv(self.csv_path)
+        st.write(f"Loaded {len(self.df)} rows from {self.csv_path}.")
 
     def convert_to_json(self):
         """Convert the CSV rows to a list of dictionaries."""
@@ -154,6 +100,7 @@ class JobSolutionRetriever:
             ])
             combined_texts.append(text_for_embedding)
 
+        st.write("Generating embeddings for each row...")
         vecs = self.embedding_model.encode(combined_texts, show_progress_bar=False)
         self.embeddings = np.array(vecs).astype('float32')
 
@@ -163,6 +110,7 @@ class JobSolutionRetriever:
 
         # Add embeddings to FAISS index
         self.index.add(self.embeddings)
+        st.write(f"FAISS index built with {self.index.ntotal} vectors.")
 
     def search(self, query: str, top_k: int = 3):
         """
@@ -184,27 +132,18 @@ def retrieve_top_solutions(main_query: str,
                            top_k_per_subquery: int = 2, 
                            final_top_k: int = 5):
     """
-    1. If the query is large, summarize it.
-    2. Generate subqueries using Groq (with the summarized or original query).
-    3. For each subquery, retrieve top_k_per_subquery results from FAISS.
-    4. Merge results, sort by distance, and return the top final_top_k.
+    1. Generate subqueries using Groq.
+    2. For each subquery, retrieve top_k_per_subquery results from FAISS.
+    3. Merge results, sort by distance, and return the top final_top_k.
     """
-
-    # 1. Summarize the query if it's too long
-    if len(main_query) > QUERY_LENGTH_THRESHOLD:
-        summarized_query = summarize_query(main_query)
-        # 2. Generate subqueries from the summarized query
-        subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
-    else:
-        # Directly generate subqueries from the original query
-        subqueries = generate_subqueries_groq(main_query, num_subqueries)
+    subqueries = generate_subqueries_groq(main_query, num_subqueries)
 
     all_results = []
     for sq in subqueries:
         sq_results = retriever.search(sq, top_k=top_k_per_subquery)
         all_results.extend(sq_results)
 
-    # Sort all results by ascending distance
+    # Sort by ascending distance
     all_results.sort(key=lambda x: x[0])
 
     final_results = all_results[:final_top_k]
@@ -231,7 +170,7 @@ def retrieve_top_solutions(main_query: str,
 
 # ========== STREAMLIT APP ==========
 
-st.title("Recommendation System")
+st.title("Groq + FAISS Subquery-based Similarity Search")
 
 # Hardcode the CSV path in the "backend"
 csv_path = r"Final_data_with_details.csv"
@@ -265,11 +204,11 @@ if st.button("Search"):
     st.subheader("Results")
     if results:
         for i, item in enumerate(results, start=1):
-            st.markdown(f"[{i}] Title**: {item['title']}")
-            st.markdown(f"- *Description*: {item['description']}")
-            st.markdown(f"- *Remote*: {item['remote']}")
-            st.markdown(f"- *Time Duration*: {item['time_duration']}")
-            st.markdown(f"- *URL*: {item['url']}")
+            st.markdown(f"**[{i}] Title**: {item['title']}")
+            st.markdown(f"- **Description**: {item['description']}")
+            st.markdown(f"- **Remote**: {item['remote']}")
+            st.markdown(f"- **Time Duration**: {item['time_duration']}")
+            st.markdown(f"- **URL**: {item['url']}")
             st.markdown("---")
     else:
         st.write("No results found.")
