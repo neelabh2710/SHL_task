@@ -12,13 +12,13 @@ os.environ["GROQ_API_KEY"] = "gsk_6QLEnN7xEDnLeKnueQIlWGdyb3FYkuzHiqZHGQ0i6Qefnh
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # A threshold for when the user query should be summarized before subquery generation
-QUERY_LENGTH_THRESHOLD = 100  # Feel free to adjust as needed
+QUERY_LENGTH_THRESHOLD = 100  # Adjust as needed
 
 # ========== Summarization for Large Queries ==========
 def summarize_query(long_query: str) -> str:
     """
-    Summarizes a long query while preserving main requirement, technical requirements, 
-    and skill sets. Uses the Groq LLM for summarization.
+    Summarizes a long query while preserving main requirement, 
+    technical requirements, and skill sets. Uses the Groq LLM for summarization.
     """
     model_name = "llama3-70b-8192"  # or "gemma-7b-it"
     
@@ -106,7 +106,7 @@ class JobSolutionRetriever:
         """
         :param csv_path: Path to the CSV file containing job solutions.
         :param embedding_model_name: Name of the SentenceTransformer model to use.
-                                     Here it's set to "local_model" to reflect your local model usage.
+                                     Default is "local_model" for your local embedding.
         """
         self.csv_path = csv_path
         self.df = None
@@ -133,9 +133,6 @@ class JobSolutionRetriever:
     def build_vector_index(self):
         """
         Build a FAISS index from the combined text of each row.
-        Assuming columns like:
-          - Solution Type, Solution Name, URL, Remote Testing Support,
-            Adaptive/IRT Support, Description, Job Level, Languages, Assessment Length
         """
         combined_texts = []
         for row in self.data_json:
@@ -180,17 +177,14 @@ class JobSolutionRetriever:
 def re_rank_with_local_model(all_results, main_query, embedding_model, final_top_k=5):
     """
     Re-rank combined (distance, row_dict) results using the SAME local model,
-    but now embedding the main_query against each candidate doc's text
-    to compute a similarity score. We'll pick the top_k based on highest similarity.
+    but embedding the *main_query* (or its summary) to compute a final similarity.
     """
-    # 1. Embed main query
+    # 1. Embed main query (or summarized version if query is large)
     main_query_emb = embedding_model.encode([main_query])[0]
 
-    # 2. Re-rank all_results by computing cosine similarity
+    # 2. For each candidate, embed "Description + Solution Name" for final scoring
     re_ranked = []
     for dist, row_data in all_results:
-        # We'll embed, for example, the "Description" + "Solution Name"
-        # (You can modify this text combination as desired.)
         text_for_embedding = row_data.get("Description", "") + " " + row_data.get("Solution Name", "")
         doc_emb = embedding_model.encode([text_for_embedding])[0]
 
@@ -204,10 +198,10 @@ def re_rank_with_local_model(all_results, main_query, embedding_model, final_top
     # 3. Sort by descending similarity
     re_ranked.sort(key=lambda x: x[0], reverse=True)
 
-    # 4. Take top_k
+    # 4. Return top_k
     re_ranked_top = re_ranked[:final_top_k]
 
-    # Format final output
+    # 5. Format final output
     output = []
     for sim, row_data in re_ranked_top:
         output.append({
@@ -222,101 +216,5 @@ def re_rank_with_local_model(all_results, main_query, embedding_model, final_top
 
 
 # ========== RETRIEVE + RERANK PIPELINE ==========
-def retrieve_top_solutions(main_query: str, 
-                           retriever: JobSolutionRetriever, 
-                           num_subqueries: int = 5, 
-                           top_k_per_subquery: int = 2, 
-                           final_top_k: int = 5):
-    """
-    1. If the query is large, summarize it.
-    2. Generate subqueries using Groq (with the summarized or original query).
-    3. For each subquery, retrieve top_k_per_subquery results from FAISS.
-    4. Club all subquery results together (optionally remove duplicates).
-    5. Rerank them using the main query with the same local model.
-    6. Return the final top_k results.
-    """
-
-    # 1. Summarize if query is large
-    if len(main_query) > QUERY_LENGTH_THRESHOLD:
-        summarized_query = summarize_query(main_query)
-        subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
-    else:
-        subqueries = generate_subqueries_groq(main_query, num_subqueries)
-
-    # 2. Gather top_k results for each subquery
-    all_results = []
-    for sq in subqueries:
-        sq_results = retriever.search(sq, top_k=top_k_per_subquery)
-        all_results.extend(sq_results)
-
-    # === OPTIONAL: Remove duplicates if the same item appears in multiple subqueries ===
-    # We'll use "URL" as a unique key. Keep whichever has the *lowest* distance from the subquery step.
-    unique_map = {}
-    for dist_val, row_data in all_results:
-        key = row_data.get("URL", "")
-        if key not in unique_map:
-            unique_map[key] = (dist_val, row_data)
-        else:
-            if dist_val < unique_map[key][0]:
-                unique_map[key] = (dist_val, row_data)
-
-    combined_unique_results = list(unique_map.values())  # => [(dist, row_dict), ...]
-
-    # 3. Now re-rank with the local model using the MAIN query
-    final_results = re_rank_with_local_model(
-        all_results=combined_unique_results,
-        main_query=main_query,
-        embedding_model=retriever.embedding_model,
-        final_top_k=final_top_k
-    )
-
-    return final_results
-
-# ========== STREAMLIT APP ==========
-st.title("Recommendation System")
-
-# Hardcode the CSV path in the "backend"
-csv_path = r"Final_data_with_details.csv"
-
-# Check if file exists
-if not os.path.exists(csv_path):
-    st.error(f"CSV not found at path: {csv_path}\n"
-             f"Please place 'Final_data_with_details.csv' in the same folder.")
-    st.stop()
-
-# Initialize the retriever in session state (only once)
-if "retriever" not in st.session_state:
-    # Use the same local model name you prefer
-    st.session_state.retriever = JobSolutionRetriever(
-        csv_path=csv_path, 
-        embedding_model_name="local_model"
-    )
-
-# Provide input fields
-main_query = st.text_input("Enter your query", "")
-num_subqueries = st.number_input("Number of Subqueries", min_value=1, value=3, step=1)
-top_k_per_subquery = st.number_input("Top-K per subquery", min_value=1, value=2, step=1)
-final_top_k = st.number_input("Final top-K", min_value=1, value=5, step=1)
-
-# On "Search" click, generate results
-if st.button("Search"):
-    results = retrieve_top_solutions(
-        main_query=main_query,
-        retriever=st.session_state.retriever,
-        num_subqueries=num_subqueries,
-        top_k_per_subquery=top_k_per_subquery,
-        final_top_k=final_top_k
-    )
-
-    st.subheader("Results")
-    if results:
-        for i, item in enumerate(results, start=1):
-            st.markdown(f"**[{i}] Title**: {item['title']}")
-            st.markdown(f"- **Similarity Score**: {item['similarity_score']:.4f}")
-            st.markdown(f"- **Description**: {item['description']}")
-            st.markdown(f"- **Remote**: {item['remote']}")
-            st.markdown(f"- **Time Duration**: {item['time_duration']}")
-            st.markdown(f"- **URL**: {item['url']}")
-            st.markdown("---")
-    else:
-        st.write("No results found.")
+def retrieve_top_solutions(
+    main_query_
