@@ -9,7 +9,7 @@ from groq import Groq
 from typing import List, Dict, Tuple
 
 # ========== Configure Groq ==========
-os.environ["GROQ_API_KEY"] = "..."
+os.environ["GROQ_API_KEY"] = "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"
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # A threshold for when the user query should be summarized before subquery generation
