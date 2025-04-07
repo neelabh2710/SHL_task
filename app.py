@@ -9,7 +9,7 @@ from groq import Groq
 from typing import List, Dict, Tuple
 
 # ========== Configure Groq ==========
-os.environ["GROQ_API_KEY"] = "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"
+os.environ["GROQ_API_KEY"] = "..."
 client = Groq(api_key=os.environ["GROQ_API_KEY"])
 
 # A threshold for when the user query should be summarized before subquery generation
@@ -21,7 +21,7 @@ def summarize_query(long_query: str) -> str:
     Summarizes a long query while preserving main requirement, technical requirements,
     and skill sets. Uses the Groq LLM for summarization.
     """
-    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
+    model_name = "llama3-70b-8192"
     
     prompt = f"""
     You are a specialized query summarizer.
@@ -61,7 +61,7 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
     Specifically preserves main requirements, technical details,
     and skill sets from the input query or summary.
     """
-    model_name = "llama3-70b-8192"  # or "gemma-7b-it"
+    model_name = "llama3-70b-8192"
     
     prompt = f"""
     You are a high-level subquery generator for a semantic search system.
@@ -95,7 +95,7 @@ def generate_subqueries_groq(user_query: str, num_subqueries: int = 5):
 # ========== FAISS Retriever Class ==========
 class JobSolutionRetriever:
     """
-    - Loads a CSV of job solutions (Final_data_with_details.csv).
+    - Loads a CSV of job solutions.
     - Converts to JSON (list of dicts).
     - Builds a FAISS index by combining multiple columns into a single text for embedding.
     - Allows searching by query.
@@ -131,9 +131,6 @@ class JobSolutionRetriever:
     def build_vector_index(self):
         """
         Build a FAISS index from the combined text of each row.
-        Assuming columns like:
-          - Solution Type, Solution Name, URL, Remote Testing Support,
-            Adaptive/IRT Support, Description, Job Level, Languages, Assessment Length
         """
         combined_texts = []
         for row in self.data_json:
@@ -173,46 +170,39 @@ class JobSolutionRetriever:
             results.append((dist, self.data_json[idx]))
         return results
 
-# ========== Re-ranking with a Better Model ==========
-def re_rank_results_with_better_model(
+# ========== Re-ranking with the SAME Model ==========
+def re_rank_results_with_same_model(
     combined_results: List[Tuple[float, Dict]],
     main_query: str,
-    better_model_name: str = "all-mpnet-base-v2",
+    embedding_model: SentenceTransformer,
     top_k: int = 5
 ) -> List[Dict]:
     """
-    1. Embed the main_query with a better (or simply different) model.
-    2. Embed each candidate result with the same model.
-    3. Compute similarity (or distance) to the main_query.
-    4. Sort the results by similarity (descending) or distance (ascending).
-    5. Return the top_k results as a list of dict.
+    1. Use the SAME embedding model to embed main_query and candidate results.
+    2. Compute cosine similarity for final re-ranking.
+    3. Return the top_k results.
     """
-    better_model = SentenceTransformer(better_model_name)
+    # Embed the main query
+    query_emb = embedding_model.encode([main_query])[0]
 
-    # Embed main query
-    query_emb = better_model.encode([main_query])[0]  # shape (768,) for mpnet
-
-    # Prepare a structure for re-ranking
     re_ranked = []
-    for dist_faiss, row_data in combined_results:
-        # Some text representation for re-ranking
-        # You can combine multiple fields if you want
+    for orig_dist, row_data in combined_results:
+        # For the final re-ranking, choose the text representation you want to compare.
+        # Here we combine "Description" + "Solution Name":
         text_for_embedding = row_data.get("Description", "") + " " + row_data.get("Solution Name", "")
-        
-        cand_emb = better_model.encode([text_for_embedding])[0]
-        
-        # Compute vector similarity (cosine)
-        # The higher the cosine similarity, the more relevant. 
-        # We can store negative of sim if we want a "distance" sorting or just store the sim.
-        # For instance, let's store similarity directly:
-        sim = np.dot(query_emb, cand_emb) / (np.linalg.norm(query_emb) * np.linalg.norm(cand_emb))
+        cand_emb = embedding_model.encode([text_for_embedding])[0]
+
+        # Compute cosine similarity
+        sim = np.dot(query_emb, cand_emb) / (
+            np.linalg.norm(query_emb) * np.linalg.norm(cand_emb)
+        )
         
         re_ranked.append((sim, row_data))
 
     # Sort by descending similarity
     re_ranked.sort(key=lambda x: x[0], reverse=True)
 
-    # Return the top_k, formatted
+    # Return the top_k in a more readable format
     final_results = []
     for sim, row_data in re_ranked[:top_k]:
         final_results.append({
@@ -236,47 +226,43 @@ def retrieve_top_solutions(
     """
     1. If the query is large, summarize it.
     2. Generate subqueries using Groq (with the summarized or original query).
-    3. For each subquery, retrieve top_k_per_subquery results from FAISS (with the initial model).
-    4. Combine (union) all these results.
-    5. Re-rank them using a better model with respect to the main query.
-    6. Return the final_top_k from that re-ranked list.
+    3. For each subquery, retrieve top_k_per_subquery results.
+    4. Combine all results into one set (removing duplicates).
+    5. Re-rank them against the main query using the SAME model as used in the retriever.
+    6. Return final_top_k items.
     """
 
-    # 1. Summarize the query if it's too long
+    # 1. Summarize if needed
     if len(main_query) > QUERY_LENGTH_THRESHOLD:
         summarized_query = summarize_query(main_query)
-        # 2. Generate subqueries from the summarized query
         subqueries = generate_subqueries_groq(summarized_query, num_subqueries)
     else:
-        # Directly generate subqueries from the original query
         subqueries = generate_subqueries_groq(main_query, num_subqueries)
 
-    # 3. Retrieve top_k_per_subquery from FAISS using the initial retriever
+    # 2. Retrieve top_k for each subquery
     all_results = []
     for sq in subqueries:
         sq_results = retriever.search(sq, top_k=top_k_per_subquery)
-        # Store them in all_results
         all_results.extend(sq_results)
 
-    # OPTIONAL: remove duplicates if there can be overlaps
-    # A simple approach is to use the "Solution Name" or "URL" as a dedup key
-    # Below is an example approach; adjust as needed:
+    # 3. Remove duplicates (based on URL, or any unique field)
     unique_map = {}
     for dist_val, row_data in all_results:
-        key = row_data.get("URL", "")  # or some unique field
+        key = row_data.get("URL", "")  # or "Solution Name" if that is unique
         if key not in unique_map:
             unique_map[key] = (dist_val, row_data)
         else:
-            # Keep whichever is best (lowest dist)
+            # Keep whichever is "closer" in the original distance
             if dist_val < unique_map[key][0]:
                 unique_map[key] = (dist_val, row_data)
+
     combined_unique_results = list(unique_map.values())
 
-    # 4. Re-rank with a better model
-    #    combined_unique_results is a list of (dist, dict)
-    re_ranked_final = re_rank_results_with_better_model(
-        combined_unique_results, main_query=main_query,
-        better_model_name="all-mpnet-base-v2",  # or any other model you prefer
+    # 4. Re-rank with the SAME model used for the retriever
+    re_ranked_final = re_rank_results_with_same_model(
+        combined_unique_results,
+        main_query=main_query,
+        embedding_model=retriever.embedding_model,  # use the same model as in retriever
         top_k=final_top_k
     )
 
@@ -285,7 +271,7 @@ def retrieve_top_solutions(
 # ========== STREAMLIT APP ==========
 st.title("Recommendation System")
 
-# Hardcode the CSV path in the "backend"
+# Hardcode the CSV path
 csv_path = r"Final_data_with_details.csv"
 
 # Check if file exists
