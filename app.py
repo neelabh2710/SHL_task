@@ -49,7 +49,7 @@ def summarize_query(long_query: str) -> str:
         model=model_name,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.7,
-        max_tokens=512
+        max_tokens=200
     )
     summarized_text = response.choices[0].message.content.strip()
     return summarized_text
